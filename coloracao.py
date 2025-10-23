@@ -1,24 +1,45 @@
-# Coloração de Grafos - M2 (Parte 1)
+# Coloração de Grafos - M2 (Parte 1 + Parte 2)
 # Entrada: arquivo texto com grafo não direcionado, não ponderado.
 # Saída: número cromático, tempo e (opcionalmente) a coloração.
 
 import argparse
 import sys
 import time
+import os
+import ctypes
+import csv
+import le_resultados
 
+# Habilita processamento de sequências ANSI no console do Windows
+if os.name == "nt":
+    try:
+        kernel32 = ctypes.windll.kernel32
+        h = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE = -11
+        mode = ctypes.c_uint()
+        if kernel32.GetConsoleMode(h, ctypes.byref(mode)):
+            ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+            new_mode = mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING
+            kernel32.SetConsoleMode(h, new_mode)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------
 # Leitura do grafo
+# ---------------------------------------------------------------------
 def carregar_grafo(arquivo):
     """
-    Lê um grafo de um arquivo em vários formatos:
-      1) Arestas: "u v"
-      2) Cabeçalho "n m" + m arestas
-      3) DIMACS: "p edge n m" e linhas "e u v"
-    Retorna (n, adj, mapa_original)
+    Lê grafos em formatos simples:
+    - Linhas começando com 'c' são comentários
+    - Linha 'p' no estilo DIMACS: p edge <n_vertices> <m_arestas> (aceita se houver)
+    - Linhas 'e u v' (DIMACS)
+    - Linhas 'u v' (duas colunas) também aceitas
+    Retorna: n, adj (lista de sets), mapa (mapa de rótulo original -> índice)
     """
     arestas = []
     n_cabecalho = None
 
-    with open(arquivo, 'r', encoding='utf-8') as f:
+    with open(arquivo, 'r', encoding='utf-8-sig') as f:
         for linha in f:
             linha = linha.strip()
             if not linha or linha.startswith('c'):
@@ -26,7 +47,8 @@ def carregar_grafo(arquivo):
 
             if linha.startswith('p '):
                 partes = linha.split()
-                if len(partes) >= 4 and partes[2].isdigit():
+                # padrão: p edge <n> <m>
+                if len(partes) >= 3 and partes[2].isdigit():
                     n_cabecalho = int(partes[2])
                 continue
 
@@ -40,9 +62,13 @@ def carregar_grafo(arquivo):
                 partes = linha.split()
                 if len(partes) == 2:
                     a, b = partes
+                    # se primeira linha do arquivo contiver apenas "n m" e ainda não tivermos arestas
                     if not arestas and n_cabecalho is None:
                         try:
-                            n_cabecalho = int(a)
+                            # tenta interpretar como 'n' header (alguns datasets usam isso)
+                            possible_n = int(a)
+                            # se deu certo, usamos como n_cabecalho e pulamos essa linha
+                            n_cabecalho = possible_n
                             continue
                         except ValueError:
                             pass
@@ -53,17 +79,19 @@ def carregar_grafo(arquivo):
             try:
                 u, v = int(u), int(v)
             except ValueError:
+                # ignora linhas mal formatadas
                 continue
 
             if u != v:
                 arestas.append((u, v))
 
     if not arestas and not n_cabecalho:
-        raise ValueError("Nenhuma aresta válida encontrada.")
+        raise ValueError("Nenhuma aresta válida encontrada no arquivo.")
 
     vertices = {v for e in arestas for v in e}
 
     if n_cabecalho:
+        # garante que consideramos rótulos 0..n-1 ou 1..n conforme os vértices presentes
         menor = min(vertices) if vertices else 1
         base = 0 if menor == 0 else 1
         if base == 0:
@@ -85,8 +113,11 @@ def carregar_grafo(arquivo):
     return n, adj, mapa
 
 
+# ---------------------------------------------------------------------
 # Algoritmos de coloração
+# ---------------------------------------------------------------------
 def valido(adj, cores):
+    """Verifica se a coloração é válida (nenhuma aresta tem mesmo rótulo nas duas pontas)."""
     for u in range(len(adj)):
         for v in adj[u]:
             if cores[u] == cores[v]:
@@ -95,37 +126,37 @@ def valido(adj, cores):
 
 
 def cores_usadas(cores):
-    return max(cores) + 1 if cores else 0
+    """
+    Retorna número de cores distintas usadas ignorando -1 (vértices não coloridos).
+    Se não houver cores válidas retorna 0.
+    """
+    if not cores:
+        return 0
+    usados = [c for c in cores if c != -1]
+    return (max(usados) + 1) if usados else 0
 
-# Exibir coloração colorida
+
 def mostrar_colorido(cores, mapa, limite=10):
-    """Mostra os vértices coloridos no terminal com cores reais"""
+    """Imprime uma versão colorida (ANSI) se o grafo for pequeno."""
     if len(cores) > limite:
         print("(Ocultando coloração colorida, grafo grande)")
         return
 
-    # Paleta de cores ANSI
     paleta = [
-        "\033[31m",  # vermelho
-        "\033[32m",  # verde
-        "\033[33m",  # amarelo
-        "\033[34m",  # azul
-        "\033[35m",  # magenta
-        "\033[36m",  # ciano
-        "\033[91m",  # vermelho claro
-        "\033[92m",  # verde claro
-        "\033[93m",  # amarelo claro
-        "\033[94m",  # azul claro
-        "\033[95m",  # magenta claro
-        "\033[96m",  # ciano claro
+        "\033[31m", "\033[32m", "\033[33m", "\033[34m",
+        "\033[35m", "\033[36m", "\033[91m", "\033[92m",
+        "\033[93m", "\033[94m", "\033[95m", "\033[96m"
     ]
     reset = "\033[0m"
 
+    # mapa: rótulo original -> índice ; inv: índice -> rótulo original
     inv = {v: u for u, v in mapa.items()}
     print("\nVértices coloridos:")
     for i, c in enumerate(cores):
-        cor_ansi = paleta[c % len(paleta)]
-        print(f"{cor_ansi}{inv[i]} -> cor {c}{reset}")
+        cor_ansi = paleta[c % len(paleta)] if c != -1 else ""
+        label = inv.get(i, i)
+        cor_text = f"cor {c}" if c != -1 else "sem cor"
+        print(f"{cor_ansi}{label} -> {cor_text}{reset}")
 
 
 def guloso(adj):
@@ -140,9 +171,15 @@ def guloso(adj):
     return cores
 
 
-def welsh_powell(adj):
+def welsh_powell(adj, mapa=None):
     n = len(adj)
     ordem = sorted(range(n), key=lambda v: len(adj[v]), reverse=True)
+    if mapa:
+        inv = {v: u for u, v in mapa.items()}
+        ordem_rotulos = [inv[i] for i in ordem]
+        print("Ordem dos vértices (Welsh–Powell) — rótulos originais:", ordem_rotulos)
+    else:
+        print("Ordem dos vértices (Welsh–Powell):", ordem)
     cores = [-1] * n
     for v in ordem:
         viz = {cores[w] for w in adj[v] if cores[w] != -1}
@@ -160,6 +197,7 @@ def dsatur(adj):
     grau = [len(adj[v]) for v in range(n)]
     viz_cores = [set() for _ in range(n)]
 
+    # inicial: escolhe vértice de maior grau
     v = max(range(n), key=lambda x: grau[x])
     cores[v] = 0
     for w in adj[v]:
@@ -167,8 +205,10 @@ def dsatur(adj):
         sat[w] = len(viz_cores[w])
 
     for _ in range(n - 1):
-        v = max((i for i in range(n) if cores[i] == -1),
-                key=lambda x: (sat[x], grau[x]))
+        candidatos = [i for i in range(n) if cores[i] == -1]
+        if not candidatos:
+            break
+        v = max(candidatos, key=lambda x: (sat[x], grau[x]))
         cor = 0
         while cor in viz_cores[v]:
             cor += 1
@@ -181,6 +221,10 @@ def dsatur(adj):
 
 
 def forca_bruta(adj, limite=12):
+    """
+    Tenta encontrar coloração ótima por força bruta. Lança ValueError
+    se n > limite para evitar explosão combinatória.
+    """
     n = len(adj)
     if n > limite:
         raise ValueError(f"Força bruta bloqueada para n>{limite}")
@@ -200,17 +244,96 @@ def forca_bruta(adj, limite=12):
             cores[v] = -1
         return False
 
-    k = 2
+    k = 1  # começa em 1 (caso grafo trivialmente 1-colorável)
     while True:
         cores[:] = [-1] * n
         if tenta(0, k):
             return cores
         k += 1
         if k > n:
+            # pior caso: cada vértice com cor única
             return list(range(n))
 
+# ---------------------------------------------------------------------
+# Análise automática dos resultados (Parte 2)
+# ---------------------------------------------------------------------
+def prim(adj, pesos=None):
+    """
+    adj: lista de conjuntos de vizinhos
+    pesos: dict {(u,v): peso}, se None, assume peso 1
+    Retorna: lista de arestas MST, soma dos pesos
+    """
+    import heapq
 
+    n = len(adj)
+    if pesos is None:
+        pesos = {(min(u,v), max(u,v)): 1 for u in range(n) for v in adj[u] if u < v}
+
+    Q = set(range(n))
+    S = []  # MST
+    soma = 0
+
+    inicio = Q.pop()  # vértice inicial
+    visitados = {inicio}
+    heap = []
+
+    for v in adj[inicio]:
+        heapq.heappush(heap, (pesos[(min(inicio,v), max(inicio,v))], inicio, v))
+
+    while Q and heap:
+        peso, u, v = heapq.heappop(heap)
+        if v in visitados:
+            continue
+        S.append((u,v))
+        soma += peso
+        visitados.add(v)
+        Q.remove(v)
+        for w in adj[v]:
+            if w not in visitados:
+                heapq.heappush(heap, (pesos[(min(v,w), max(v,w))], v, w))
+
+    return S, soma
+
+
+def kruskal(n, arestas, pesos=None):
+    """
+    n: número de vértices
+    arestas: lista de tuplas (u,v)
+    pesos: dict {(u,v): peso}, se None, assume peso 1
+    Retorna: lista de arestas MST, soma dos pesos
+    """
+    if pesos is None:
+        pesos = {(min(u,v), max(u,v)): 1 for u,v in arestas}
+
+    # Ordena arestas por peso
+    arestas_ordenadas = sorted(arestas, key=lambda e: pesos[(min(e), max(e))])
+
+    # Inicializa floresta (representada como conjuntos)
+    parent = list(range(n))
+
+    def find(u):
+        while parent[u] != u:
+            parent[u] = parent[parent[u]]
+            u = parent[u]
+        return u
+
+    def union(u, v):
+        parent[find(u)] = find(v)
+
+    S = []
+    soma = 0
+
+    for u, v in arestas_ordenadas:
+        if find(u) != find(v):
+            S.append((u,v))
+            soma += pesos[(min(u,v), max(u,v))]
+            union(u,v)
+
+    return S, soma
+
+# ---------------------------------------------------------------------
 # Utilitários
+# ---------------------------------------------------------------------
 def medir(funcao, *args, **kwargs):
     inicio = time.perf_counter()
     res = funcao(*args, **kwargs)
@@ -218,15 +341,125 @@ def medir(funcao, *args, **kwargs):
     return res, fim - inicio
 
 
+def imprimir_tabela_resultados(resultados):
+    print("\nResumo dos resultados:")
+    print(f"{'Algoritmo':<12} {'Cores':>6} {'Tempo(s)':>12} {'Válido':>8}")
+    print("-" * 44)
+    for r in resultados:
+        print(f"{r['alg']:<12} {r['cores']:>6} {r['tempo']:>12.6f} {str(r['valido']):>8}")
+    print()
+
+
+def salvar_csv_resultados(resultados, caminho):
+    """
+    Salva a lista de resultados (lista de dicionários) em CSV.
+    Cada dicionário esperado conter: alg, cores, tempo, valido, (opcional) cores_map.
+    """
+    campos = ["alg", "cores", "tempo", "valido"]
+    try:
+        with open(caminho, "w", newline='', encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["algoritmo", "cores", "tempo", "valido"])
+            for r in resultados:
+                writer.writerow([r.get("alg"), r.get("cores"), r.get("tempo"), r.get("valido")])
+        print(f"\nResultado salvo em CSV: {caminho}")
+    except Exception as e:
+        print(f"Erro ao salvar CSV em {caminho}: {e}", file=sys.stderr)
+
+
+def rodar_em_lote(pasta, limite=12):
+    if not os.path.isdir(pasta):
+        print(f"Erro: a pasta '{pasta}' não existe.")
+        return
+
+    pasta = os.path.abspath(pasta)
+    print(f"\nExecutando na pasta: {pasta}\n")
+
+    funcoes = {
+        "greedy": guloso,
+        "welsh": lambda a: welsh_powell(a, None),
+        "dsatur": dsatur,
+        "brute": lambda a: forca_bruta(a, limite),
+    }
+
+    resultados_csv = []
+
+    for arquivo in os.listdir(pasta):
+        if not arquivo.endswith(".txt"):
+            continue
+        caminho = os.path.join(pasta, arquivo)
+        try:
+            n, adj, mapa = carregar_grafo(caminho)
+        except Exception as e:
+            print(f"Erro ao ler {arquivo}: {e}")
+            continue
+
+        print(f"\n--- {arquivo} ({n} vértices) ---")
+        for nome, func in funcoes.items():
+            if nome == "brute" and n > limite:
+                print(f"Pular {nome} (n={n} > limite={limite})")
+                continue
+            try:
+                cores, tempo = medir(func, adj)
+            except ValueError as e:
+                print(f"Erro em {nome}: {e}")
+                continue
+            k = cores_usadas(cores)
+            valido_flag = valido(adj, cores)
+            resultados_csv.append([arquivo, n, nome, k, tempo, valido_flag])
+            print(f"{nome}: cores={k}, tempo={tempo:.6f}s, válido={valido_flag}")
+
+    # salva arquivo CSV com resultados de lote
+    try:
+        with open("resultados_lote.csv", "w", newline='', encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["arquivo", "vertices", "algoritmo", "cores", "tempo", "valido"])
+            writer.writerows(resultados_csv)
+        print("\nResultados salvos em 'resultados_lote.csv'.")
+    except Exception as e:
+        print(f"Erro ao salvar resultados_lote.csv: {e}")
+
+    # === INÍCIO ANÁLISE AUTOMÁTICA ===
+    print("\nIniciando análise dos resultados (Parte 2)...")
+    try:
+        df = le_resultados.carregar_resultados("resultados_lote.csv")
+        le_resultados.gerar_graficos(df)
+        le_resultados.gerar_relatorio_textual(df)
+        print("\nAnálise concluída! Gráficos salvos:")
+        print("   - grafico_tempo.png")
+        print("   - grafico_cores.png")
+        print("   - grafico_dispersao.png\n")
+    except Exception as e:
+        print(f"\nErro ao gerar análise automática: {e}\n")
+    # === FIM ANÁLISE AUTOMÁTICA ===
+
+
+# ---------------------------------------------------------------------
 # Execução principal
+# ---------------------------------------------------------------------
+# ---------------------------------------------------------------------
+# Execução principal
+# ---------------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="Coloração de Grafos (Parte 1)")
-    parser.add_argument("-i", "--input", required=True, help="Arquivo do grafo")
-    parser.add_argument("-a", "--algo", choices=["brute", "greedy", "welsh", "dsatur"], required=True)
-    parser.add_argument("--verify", action="store_true", help="Verificar se coloração é válida")
-    parser.add_argument("--show", action="store_true", help="Mostrar vértice->cor (para n<10)")
-    parser.add_argument("--limit", type=int, default=12, help="Limite de vértices para força bruta")
+    parser = argparse.ArgumentParser(description="Coloração de Grafos + MST (Parte 1 + 2)")
+    DEFAULT_GRAPH_DIR = "grafos"
+    parser.add_argument("--batch", help="Executa todos os algoritmos em todos os grafos de uma pasta")
+    parser.add_argument("-i", "--input", help="Arquivo do grafo")
+    parser.add_argument("--algo", choices=["brute", "greedy", "welsh", "dsatur"])
+    parser.add_argument("--compare", action="store_true")
+    parser.add_argument("--verify", action="store_true")
+    parser.add_argument("--show", action="store_true")
+    parser.add_argument("--limit", type=int, default=12)
+    parser.add_argument("--output", help="Salvar resultado (CSV)")
+    parser.add_argument("--mst", action="store_true", help="Executa algoritmos de árvore geradora mínima (Prim e Kruskal)")
     args = parser.parse_args()
+
+    if not args.batch and not args.input:
+        parser.error("Use --batch para modo em lote ou -i/--input para grafo único.")
+
+    if args.batch:
+        rodar_em_lote(args.batch or DEFAULT_GRAPH_DIR, args.limit)
+        return
 
     try:
         n, adj, mapa = carregar_grafo(args.input)
@@ -234,35 +467,118 @@ def main():
         print("Erro ao ler o grafo:", e, file=sys.stderr)
         sys.exit(1)
 
-    if args.algo == "brute" and n > args.limit:
-        print(f"Grafo tem {n} vértices (> {args.limit}). Use heurísticas.", file=sys.stderr)
-        sys.exit(2)
+    # =====================
+    # Parte 1 - Coloração
+    # =====================
+    if not args.mst:
+        funcoes = {
+            "greedy": guloso,
+            "welsh": welsh_powell,
+            "dsatur": dsatur,
+            "brute": lambda a: forca_bruta(a, args.limit),
+        }
 
-    funcoes = {
-        "greedy": guloso,
-        "welsh": welsh_powell,
-        "dsatur": dsatur,
-        "brute": lambda a: forca_bruta(a, args.limit),
-    }
+        if args.compare:
+            ordem_exec = ["greedy", "welsh", "dsatur", "brute"]
+            resultados = []
+            for nome in ordem_exec:
+                if nome == "brute" and n > args.limit:
+                    print(f"Pular força bruta: grafo tem {n} vértices (> {args.limit}).")
+                    continue
+                func = funcoes[nome]
+                print(f"\nExecutando {nome}...")
+                cores, tempo = medir(func, adj)
+                k = cores_usadas(cores)
+                valido_flag = valido(adj, cores)
+                resultados.append({
+                    "alg": nome,
+                    "cores": k,
+                    "tempo": tempo,
+                    "valido": valido_flag,
+                    "cores_map": cores
+                })
+                print(f"{nome}: cores={k}, tempo={tempo:.6f}s, válido={valido_flag}")
 
-    cores, tempo = medir(funcoes[args.algo], adj)
-    k = cores_usadas(cores)
+            if resultados:
+                imprimir_tabela_resultados(resultados)
+            return
 
-    print(f"Algoritmo: {args.algo}")
-    print(f"Vértices: {n}")
-    print(f"Cores usadas: {k}")
-    print(f"Tempo: {tempo:.6f}s")
+        if args.algo:
+            if args.algo == "brute" and n > args.limit:
+                print(f"Grafo tem {n} vértices (> {args.limit}). Use heurísticas ou aumente --limit.", file=sys.stderr)
+                sys.exit(2)
 
-    if args.verify:
-        print("Coloração válida:", "sim" if valido(adj, cores) else "não")
+            func = funcoes[args.algo]
+            cores, tempo = medir(func, adj)
+            k = cores_usadas(cores)
+            print(f"Algoritmo: {args.algo}")
+            print(f"Vértices: {n}")
+            print(f"Cores usadas: {k}")
+            print(f"Tempo: {tempo:.6f}s")
 
-    if args.show and n < 10:
-        inv = {v: u for u, v in mapa.items()}
-        print("Vértice -> Cor")
-        for i in range(n):
-            print(f"{inv[i]} -> {cores[i]}")
-            print()
-            mostrar_colorido(cores, mapa)
+            if args.verify:
+                print("Coloração válida:", "sim" if valido(adj, cores) else "não")
+
+            if args.show and n < 10:
+                inv = {v: u for u, v in mapa.items()}
+                print("\nVértice -> Cor")
+                for i in range(n):
+                    print(f"{inv[i]} -> {cores[i]}")
+                print()
+                mostrar_colorido(cores, mapa)
+
+            if args.output:
+                inv = {v: u for u, v in mapa.items()}
+                with open(args.output, "w", encoding="utf-8") as f:
+                    f.write("vertice,cor\n")
+                    for i in range(n):
+                        f.write(f"{inv[i]},{cores[i]}\n")
+                print(f"\nResultado salvo em: {args.output}")
+
+    # =====================
+    # Parte 2 - MST
+    # =====================
+    if args.mst:
+        print(f"\nExecutando MST (Prim e Kruskal) para {args.input} ({n} vértices)")
+
+        # Prepara lista de arestas para MST
+        arestas = [(u,v) for u in range(n) for v in adj[u] if u < v]
+
+        mst_funcoes = {
+            "prim": lambda: prim(adj),
+            "kruskal": lambda: kruskal(n, arestas)
+        }
+
+        resultados_mst = []
+
+        for nome, func in mst_funcoes.items():
+            inicio = time.perf_counter()
+            S, soma = func()
+            fim = time.perf_counter()
+            tempo = fim - inicio
+            print(f"{nome}: soma arestas={soma}, tempo={tempo:.6f}s")
+
+            if args.show and n < 10:
+                print(f"Arestas MST ({nome}):")
+                for u,v in S:
+                    print(f"{u} - {v}")
+
+            # Salva resultados em lista
+            resultados_mst.append({
+                "alg": nome,
+                "soma_arestas": soma,
+                "tempo": tempo,
+                "num_arestas": len(S)
+            })
+
+        # Salva CSV
+        csv_file = args.output or "resultados_mst.csv"
+        with open(csv_file, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["algoritmo", "soma_arestas", "tempo", "num_arestas"])
+            for r in resultados_mst:
+                writer.writerow([r["alg"], r["soma_arestas"], r["tempo"], r["num_arestas"]])
+        print(f"\nResultados MST salvos em: {csv_file}")
 
 
 
