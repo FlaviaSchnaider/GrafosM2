@@ -8,10 +8,6 @@ import time
 import os
 import csv
 import le_resultados
-import platform
-
-if platform.system() == "Windows":
-    os.system("")  # habilita ANSI no terminal Windows 
 
 # Leitura do grafo
 def carregar_grafo(arquivo):
@@ -24,6 +20,7 @@ def carregar_grafo(arquivo):
     Retorna: n, adj (lista de sets), mapa (mapa de rótulo original -> índice)
     """
     arestas = []
+    pesos = {}
     n_cabecalho = None
 
     with open(arquivo, 'r', encoding='utf-8-sig') as f:
@@ -32,54 +29,38 @@ def carregar_grafo(arquivo):
             if not linha or linha.startswith('c'):
                 continue
 
-            if linha.startswith('p '):
-                partes = linha.split()
-                # padrão: p edge <n> <m>
-                if len(partes) >= 3 and partes[2].isdigit():
-                    n_cabecalho = int(partes[2])
+            partes = linha.split()
+
+            # Cabeçalho opcional
+            if partes[0] == 'p' and len(partes) >= 3 and partes[2].isdigit():
+                n_cabecalho = int(partes[2])
                 continue
 
-            if linha.startswith('e '):
-                partes = linha.split()
-                if len(partes) >= 3:
-                    u, v = partes[1], partes[2]
-                else:
-                    continue
-            else:
-                partes = linha.split()
-                if len(partes) == 2:
-                    a, b = partes
-                    # se primeira linha do arquivo contiver apenas "n m" e ainda não tivermos arestas
-                    if not arestas and n_cabecalho is None:
-                        try:
-                            # tenta interpretar como 'n' header (alguns datasets usam isso)
-                            possible_n = int(a)
-                            # se deu certo, usamos como n_cabecalho e pulamos essa linha
-                            n_cabecalho = possible_n
-                            continue
-                        except ValueError:
-                            pass
-                    u, v = a, b
-                else:
-                    continue
+            # Remove prefixo "e" se existir
+            if partes[0] == 'e':
+                partes = partes[1:]
+
+            if len(partes) < 2:
+                continue
 
             try:
-                u, v = int(u), int(v)
+                u = int(partes[0])
+                v = int(partes[1])
+                w = float(partes[2]) if len(partes) >= 3 else 1.0
             except ValueError:
-                # ignora linhas mal formatadas
                 continue
 
             if u != v:
                 arestas.append((u, v))
+                pesos[(min(u, v), max(u, v))] = w
 
-    if not arestas and not n_cabecalho:
+    if not arestas:
         raise ValueError("Nenhuma aresta válida encontrada no arquivo.")
 
+    # Mapeia vértices
     vertices = {v for e in arestas for v in e}
-
     if n_cabecalho:
-        # garante que consideramos rótulos 0..n-1 ou 1..n conforme os vértices presentes
-        menor = min(vertices) if vertices else 1
+        menor = min(vertices)
         base = 0 if menor == 0 else 1
         if base == 0:
             vertices |= set(range(0, n_cabecalho))
@@ -91,14 +72,14 @@ def carregar_grafo(arquivo):
     n = len(lista_vertices)
     adj = [set() for _ in range(n)]
 
+    pesos_idx = {}
     for u, v in arestas:
         i, j = mapa[u], mapa[v]
-        if i != j:
-            adj[i].add(j)
-            adj[j].add(i)
+        adj[i].add(j)
+        adj[j].add(i)
+        pesos_idx[(min(i, j), max(i, j))] = pesos[(min(u, v), max(u, v))]
 
-    return n, adj, mapa
-
+    return n, adj, mapa, pesos_idx
 
 # Algoritmos de coloração
 def valido(adj, cores):
@@ -162,9 +143,9 @@ def welsh_powell(adj, mapa=None):
     if mapa:
         inv = {v: u for u, v in mapa.items()}
         ordem_rotulos = [inv[i] for i in ordem]
-        print("Ordem dos vértices (Welsh–Powell) — rótulos originais:", ordem_rotulos)
-    else:
-        print("Ordem dos vértices (Welsh–Powell):", ordem)
+        # print("Ordem dos vértices (Welsh–Powell) — rótulos originais:", ordem_rotulos)
+    # else:
+        # print("Ordem dos vértices (Welsh–Powell):", ordem)
     cores = [-1] * n
     for v in ordem:
         viz = {cores[w] for w in adj[v] if cores[w] != -1}
@@ -250,48 +231,48 @@ def prim(adj, pesos=None):
 
     n = len(adj)
     if pesos is None:
-        pesos = {(min(u,v), max(u,v)): 1 for u in range(n) for v in adj[u] if u < v}
+        pesos = {(min(u, v), max(u, v)): 1 for u in range(n) for v in adj[u] if u < v}
 
-    Q = set(range(n))
-    S = []  # MST
-    soma = 0
+    visitados = set()
+    soma = 0.0
+    mst_arestas = []
 
-    inicio = Q.pop()  # vértice inicial
-    visitados = {inicio}
-    heap = []
+    # começa no vértice 0
+    atual = 0
+    visitados.add(atual)
 
-    for v in adj[inicio]:
-        heapq.heappush(heap, (pesos[(min(inicio,v), max(inicio,v))], inicio, v))
+    # inicializa heap com as arestas do primeiro vértice
+    heap = [(pesos[(min(atual, v), max(atual, v))], atual, v) for v in adj[atual]]
+    heapq.heapify(heap)
 
-    while Q and heap:
+    while heap and len(visitados) < n:
         peso, u, v = heapq.heappop(heap)
         if v in visitados:
             continue
-        S.append((u,v))
-        soma += peso
+
         visitados.add(v)
-        Q.remove(v)
+        soma += peso
+        mst_arestas.append((u, v))
+
         for w in adj[v]:
             if w not in visitados:
-                heapq.heappush(heap, (pesos[(min(v,w), max(v,w))], v, w))
+                heapq.heappush(heap, (pesos.get((min(v, w), max(v, w)), 1), v, w))
 
-    return S, soma
-
+    return mst_arestas, soma
 
 def kruskal(n, arestas, pesos=None):
     """
     n: número de vértices
-    arestas: lista de tuplas (u,v)
+    arestas: lista de tuplas (u, v)
     pesos: dict {(u,v): peso}, se None, assume peso 1
-    Retorna: lista de arestas MST, soma dos pesos
+    Retorna: lista de arestas MST e soma dos pesos
     """
     if pesos is None:
-        pesos = {(min(u,v), max(u,v)): 1 for u,v in arestas}
+        pesos = {(min(u, v), max(u, v)): 1 for u, v in arestas}
 
-    # Ordena arestas por peso
-    arestas_ordenadas = sorted(arestas, key=lambda e: pesos[(min(e), max(e))])
+    # ordena as arestas por peso
+    arestas_ordenadas = sorted(arestas, key=lambda e: pesos.get((min(e), max(e)), 1))
 
-    # Inicializa floresta (representada como conjuntos)
     parent = list(range(n))
 
     def find(u):
@@ -303,16 +284,16 @@ def kruskal(n, arestas, pesos=None):
     def union(u, v):
         parent[find(u)] = find(v)
 
-    S = []
-    soma = 0
+    mst_arestas = []
+    soma = 0.0
 
     for u, v in arestas_ordenadas:
         if find(u) != find(v):
-            S.append((u,v))
-            soma += pesos[(min(u,v), max(u,v))]
-            union(u,v)
+            union(u, v)
+            mst_arestas.append((u, v))
+            soma += pesos.get((min(u, v), max(u, v)), 1)
 
-    return S, soma
+    return mst_arestas, soma
 
 # Uteis
 def medir(funcao, *args, **kwargs):
@@ -400,7 +381,7 @@ def rodar_em_lote(pasta, limite=12):
     except Exception as e:
         print(f"Erro ao salvar resultados_lote.csv: {e}")
 
-    # === INÍCIO ANÁLISE AUTOMÁTICA ===
+    # ANÁLISE AUTOMÁTICA 
     print("\nIniciando análise dos resultados (Parte 2)...")
     try:
         df = le_resultados.carregar_resultados("resultados_lote.csv")
@@ -412,7 +393,7 @@ def rodar_em_lote(pasta, limite=12):
         print("   - grafico_dispersao.png\n")
     except Exception as e:
         print(f"\nErro ao gerar análise automática: {e}\n")
-    # === FIM ANÁLISE AUTOMÁTICA ===
+
 
 
 # Execução principal
@@ -438,7 +419,7 @@ def main():
         return
 
     try:
-        n, adj, mapa = carregar_grafo(args.input)
+        n, adj, mapa, pesos = carregar_grafo(args.input)
     except Exception as e:
         print("Erro ao ler o grafo:", e, file=sys.stderr)
         sys.exit(1)
@@ -517,8 +498,8 @@ def main():
         arestas = [(u,v) for u in range(n) for v in adj[u] if u < v]
 
         mst_funcoes = {
-            "prim": lambda: prim(adj),
-            "kruskal": lambda: kruskal(n, arestas)
+            "prim": lambda: prim(adj, pesos),
+            "kruskal": lambda: kruskal(n, arestas, pesos)
         }
 
         resultados_mst = []
@@ -528,7 +509,7 @@ def main():
             S, soma = func()
             fim = time.perf_counter()
             tempo = fim - inicio
-            print(f"{nome}: soma arestas={soma}, tempo={tempo:.6f}s")
+            print(f"{nome}: soma = {soma}, tempo = {tempo:.6f}s")
 
             if args.show and n < 10:
                 print(f"Arestas MST ({nome}):")
