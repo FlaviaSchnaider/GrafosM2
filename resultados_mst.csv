@@ -1,0 +1,3 @@
+algoritmo,soma_arestas,tempo,num_arestas
+prim,3,2.989999484270811e-05,3
+kruskal,3,3.060000017285347e-05,3

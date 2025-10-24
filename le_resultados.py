@@ -12,7 +12,7 @@ def analisar_resultados(df):
         "cores": "mean",
         "valido": lambda x: (x == True).mean() * 100
     }).rename(columns={"valido": "taxa_validez (%)"})
-    resumo["tempo"] = resumo["tempo"] * 1000  # converter segundos → milissegundos
+    resumo["tempo"] = resumo["tempo"] * 1000  # converter segundos para milissegundos
     return resumo
 
 def gerar_graficos(df):

@@ -6,27 +6,14 @@ import argparse
 import sys
 import time
 import os
-import ctypes
 import csv
 import le_resultados
+import platform
 
-# Habilita processamento de sequências ANSI no console do Windows
-if os.name == "nt":
-    try:
-        kernel32 = ctypes.windll.kernel32
-        h = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE = -11
-        mode = ctypes.c_uint()
-        if kernel32.GetConsoleMode(h, ctypes.byref(mode)):
-            ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
-            new_mode = mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING
-            kernel32.SetConsoleMode(h, new_mode)
-    except Exception:
-        pass
+if platform.system() == "Windows":
+    os.system("")  # habilita ANSI no terminal Windows 
 
-
-# ---------------------------------------------------------------------
 # Leitura do grafo
-# ---------------------------------------------------------------------
 def carregar_grafo(arquivo):
     """
     Lê grafos em formatos simples:
@@ -113,9 +100,7 @@ def carregar_grafo(arquivo):
     return n, adj, mapa
 
 
-# ---------------------------------------------------------------------
 # Algoritmos de coloração
-# ---------------------------------------------------------------------
 def valido(adj, cores):
     """Verifica se a coloração é válida (nenhuma aresta tem mesmo rótulo nas duas pontas)."""
     for u in range(len(adj)):
@@ -254,9 +239,7 @@ def forca_bruta(adj, limite=12):
             # pior caso: cada vértice com cor única
             return list(range(n))
 
-# ---------------------------------------------------------------------
 # Análise automática dos resultados (Parte 2)
-# ---------------------------------------------------------------------
 def prim(adj, pesos=None):
     """
     adj: lista de conjuntos de vizinhos
@@ -331,9 +314,7 @@ def kruskal(n, arestas, pesos=None):
 
     return S, soma
 
-# ---------------------------------------------------------------------
-# Utilitários
-# ---------------------------------------------------------------------
+# Uteis
 def medir(funcao, *args, **kwargs):
     inicio = time.perf_counter()
     res = funcao(*args, **kwargs)
@@ -434,12 +415,7 @@ def rodar_em_lote(pasta, limite=12):
     # === FIM ANÁLISE AUTOMÁTICA ===
 
 
-# ---------------------------------------------------------------------
 # Execução principal
-# ---------------------------------------------------------------------
-# ---------------------------------------------------------------------
-# Execução principal
-# ---------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(description="Coloração de Grafos + MST (Parte 1 + 2)")
     DEFAULT_GRAPH_DIR = "grafos"
@@ -467,9 +443,7 @@ def main():
         print("Erro ao ler o grafo:", e, file=sys.stderr)
         sys.exit(1)
 
-    # =====================
     # Parte 1 - Coloração
-    # =====================
     if not args.mst:
         funcoes = {
             "greedy": guloso,
@@ -535,9 +509,7 @@ def main():
                         f.write(f"{inv[i]},{cores[i]}\n")
                 print(f"\nResultado salvo em: {args.output}")
 
-    # =====================
     # Parte 2 - MST
-    # =====================
     if args.mst:
         print(f"\nExecutando MST (Prim e Kruskal) para {args.input} ({n} vértices)")
 
