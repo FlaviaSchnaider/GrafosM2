@@ -1,9 +1,9 @@
 # Análise de Grafos — M2
-
 Implementação em Python para análise e coloração de grafos, incluindo também a geração de árvores geradoras mínimas (MST) com os algoritmos Prim e Kruskal.
 
 
-## Execução dos Algoritmos### Formato Geral
+## Execução dos Algoritmos
+### Formato Geral
 python coloracao.py --input <arquivo.txt> --algo <algoritmo> [opções]
 
 
